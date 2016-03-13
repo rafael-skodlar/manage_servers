@@ -3,12 +3,12 @@
 #
 # create code directories for root, system administrator, or advanced users
 
-home_directories="bin etc info tmp var"
+home_sub_directories="bin etc info tmp var"
 
 #ensure we are in HOME dir
 cd $HOME
 
-for hdir in $home_directories
+for hdir in $home_sub_directories
 do
     if [ ! -d $hdir ]; then
         echo -e "..... created $hdir"
@@ -43,7 +43,7 @@ What's worse is the fact that this is spreading into servers and root user space
 
 DO NOT USE SPACES IN FILE or DIRECTORY names! Use underscore to separate words
 in the same file name. Spaces or other strange characters become a nightmare
-for writing scripts or use on the command line. Spaces sparate file names in
+for writing scripts or use on the command line. Spaces separate file names in
 generic Unix terminal.
 </rant>
 
@@ -61,6 +61,7 @@ var  scripts and cron job logs and output files. Files should be created in
     under /root/etc
     tar cvf etc/sysconfig_$(date '+%Y%m%d').tar /etc/sysconfig
 
+NOTE: not tested in terminals set for other languages.
 EOM
 
 # move itself to ~/bin if not there already
