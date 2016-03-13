@@ -1,0 +1,69 @@
+#!/bin/bash
+# 2015-04-07 Rafael Skodlar
+#
+# create code directories for root, system administrator, or advanced users
+
+home_directories="bin etc info tmp var"
+
+#ensure we are in HOME dir
+cd $HOME
+
+for hdir in $home_directories
+do
+    if [ ! -d $hdir ]; then
+        echo -e "..... created $hdir"
+        mkdir $hdir
+    fi
+done
+
+cat << EOM > etc/${USER}_backup_list
+# list of directories and files for backup. Add other files as well.
+# Used in another script. Comment or empty lines are (to be) ignored.
+
+bin
+etc
+info
+var
+EOM
+
+echo -e "PATH=$PATH:~/bin" >> .bashrc
+echo -e "export PATH" >> .bashrc
+
+cat << EOM > info/README
+<rant>
+It is a good idea to create a set of directories in _classic Unix style_
+Same structure would benefit others as well. It's only recently that Linux
+distributions started to immitate crappy OS with directories such as
+Documents, Music, etc. where mixing upper and lower case letters in their names
+requires two hands or additional finger to type their names. This is very
+awkward when you need to hold the keyboard and type at the same time when working
+in some data centers, etc.
+
+What's worse is the fact that this is spreading into servers and root user space!
+
+DO NOT USE SPACES IN FILE or DIRECTORY names! Use underscore to separate words
+in the same file name. Spaces or other strange characters become a nightmare
+for writing scripts or use on the command line. Spaces sparate file names in
+generic Unix terminal.
+</rant>
+
+Home directory structures were created with utility $0
+directories usage:
+bin  scripts and related files
+etc  copies of older configuration files from /etc
+    (mostly useful for root or sysadmin)
+info information collected during administration work for future reference [1]
+tmp  temporary files that survive system reboot
+var  scripts and cron job logs and output files. Files should be created in
+    subdirectories for clarity.
+
+[1] example: as root create CentOS network configuration snapshot as a tar file
+    under /root/etc
+    tar cvf etc/sysconfig_$(date '+%Y%m%d').tar /etc/sysconfig
+
+EOM
+
+# move itself to ~/bin if not there already
+if [ "$(dirname $0)" != "$HOME/bin" ]; then
+	mv $0 $HOME/bin
+fi

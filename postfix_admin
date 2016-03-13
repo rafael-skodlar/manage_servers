@@ -1,0 +1,234 @@
+#!/bin/sh
+# 2015-05-25 Rafael Skodlar
+# Manage Postfix server
+
+SYSADMIN=root
+DATE=`date '+%Y-%m-%d'`
+MONTH=`date '+%Y-%m'`
+TIME=`date '+%H:%M'`
+FUNCTIONS1=${HOME}/bin/functions_sysadmin.sh
+FUNCTIONS2=${HOME}/bin/functions_time.sh
+FUNCTIONS="$FUNCTIONS1 $FUNCTIONS2"
+
+POSTFIX_CONFIG_DIR=/etc/postfix
+EMAIL_HEADER_CHECKS=${POSTFIX_CONFIG_DIR}/maps/header_checks
+EMAIL_ACCESS=${POSTFIX_CONFIG_DIR}/maps/access_client
+map_access=${POSTFIX_CONFIG_DIR}/access_client
+POSTFIX_LOG=/var/log/mail.log
+LOG=~/var/postfix.blocked
+config_check=/tmp/postfix_config
+
+for funct in $FUNCTIONS
+do
+    if [ ! -e $funct ]; then
+        echo -e "\n\tMissing: $funct\n"
+        exit 1
+    else
+        source $funct
+    fi
+done
+
+if [ ! -d $POSTFIX_CONFIG_DIR ]; then
+cat << EOM
+
+  Nothing to do here.
+  Missing: $POSTFIX_CONFIG_DIR
+
+    >>>  Postfix is most likely not installed.  <<<
+
+EOM
+
+exit 1
+fi
+
+[ ! -d $LOG_DIR ] && mkdir -p $LOG_DIR
+
+pf_stats() {
+echo -e "\n..... antispam stats"
+wc -l $EMAIL_HEADER_CHECKS
+Received_count=$(grep Received: $EMAIL_HEADER_CHECKS | wc -l)
+Subject_count=$(grep Subject: $EMAIL_HEADER_CHECKS | wc -l)
+HEADER_count=$(grep HEADER $EMAIL_HEADER_CHECKS | wc -l)
+ReturnPath_count=$(grep Return-Path $EMAIL_HEADER_CHECKS | wc -l)
+
+cat << EOM
+   Received: $Received_count
+    Subject: $Subject_count
+     HEADER: $HEADER_count
+Return-Path: $ReturnPath_count
+
+EOM
+}
+
+my_help() {
+cat << EOM
+
+$(make_line 60 =)
+  $0
+        block  <domain name>
+         edit  $EMAIL_HEADER_CHECKS
+         grep  <domain name> $EMAIL_HEADER_CHECKS
+         view  header file: $EMAIL_HEADER_CHECKS
+  maintenance  edit config files, check config, reload, stop or start, postmap, mailq, view logs
+   statistics  simple header file or logs statistics
+
+$(make_line 60 =)
+EOM
+}
+
+anti_spam() {
+HEADER_TYPE="RETURN block_domain_or_IP edit_header_file Received Return Subject"
+
+
+select anti_spam_item in $HEADER_TYPE
+do
+    if [ "$anti_spam_item" == "RETURN" ]; then
+        return
+    fi
+    domain=$(usr_input "block domain or IP")
+    grep $domain $EMAIL_HEADER_CHECKS
+    if [ $? -eq 0 ]; then
+        echo -e "$domain possibly blocked already"
+    fi
+    if [ "$anti_spam_item" == "block_domain_or_IP" ]; then
+            echo -e "/^Received: .*.${domain}.*/ REJECT" >> $EMAIL_HEADER_CHECKS
+        fi
+    elif [ "$anti_spam_item" == "block_IP" ]; then
+        IP=$(usr_input "block IP")
+        echo "$IP REJECT" >> $EMAIL_ACCESS
+        postmap $EMAIL_ACCESS
+        echo "..... blocked $domain"
+        break
+    elif [ "$anti_spam_item" == "edit_header_file" ]; then
+        vi $EMAIL_HEADER_CHECKS
+    elif [ "$anti_spam_item" == "view_header_file" ]; then
+        less $EMAIL_HEADER_CHECKS
+    elif [ "$anti_spam_item" == "Received" -o "$anti_spam_item" == "" ]; then
+        echo -e "/^Received: .*.${domain}.*/ REJECT" >> $EMAIL_HEADER_CHECKS
+    elif [ "$anti_spam_item" == "Return" ]; then
+        echo -e "/^Return: .*.${domain}.*/ REJECT" >> $EMAIL_HEADER_CHECKS
+    elif [ "$anti_spam_item" == "Subject" ]; then
+        echo -e "/^Subject: .*.${domain}.*/ REJECT" >> $EMAIL_HEADER_CHECKS
+    fi
+    #postmap hash:$EMAIL_HEADER_CHECKS
+    #postmap $EMAIL_HEADER_CHECKS
+    echo "..... blocked $domain"
+    last_step="blocked $domain"
+    break
+done
+}
+
+pf_maintenance() {
+POSTFIX_COMMANDS="RETURN edit_config_files edit_maps config_check reload stop start postmap mailq view_log"
+cd $POSTFIX_CONFIG_DIR
+
+select postfix_command in $POSTFIX_COMMANDS
+do
+    if [ "$postfix_command" == "RETURN" ]; then
+        return
+    elif [ "$postfix_command" == "edit_config_files" ]; then
+        file2edit=$(select_file -all $POSTFIX_CONFIG_DIR)
+        vi $file2edit
+    elif [ "$postfix_command" == "edit_maps" ]; then
+        file2edit=$(select_file -all ${POSTFIX_CONFIG_DIR}/maps)
+        vi maps/$file2edit
+    elif [ "$postfix_command" == "reload" ]; then
+        service postfix reload
+        last_step="reload"
+    elif [ "$postfix_command" == "stop" ]; then
+        service postfix stop
+        last_step="stop"
+    elif [ "$postfix_command" == "start" ]; then
+        service postfix start
+        last_step="start"
+    elif [ "$postfix_command" == "config_check" -o "$postfix_command" == "" ]; then
+        echo -e "===== postconf -m"
+        postconf -m > $config_check
+        echo -e "===== postconf -d"
+        postconf -d >> $config_check
+        last_step="config_check"
+        less $config_check
+    elif [ "$postfix_command" == "postmap" ]; then
+        echo -e "..... postmap hash:$EMAIL_HEADER_CHECKS"
+        echo "under construction"
+        #pf_maps $EMAIL_HEADER_CHECKS
+        #less $config_check
+    elif [ "$postfix_command" == "mailq" ]; then
+        pf_queue
+    elif [ "$postfix_command" == "view_log" ]; then
+        less $POSTFIX_LOG
+        last_step="view file: $POSTFIX_LOG"
+    fi
+    break
+done
+}
+
+pf_queue() {
+QUEUE_COMMANDS="RETURN all qID deffered flush_queue"
+echo -e "\nmail queue type ($QUEUE_COMMANDS)"
+select queue_type in $QUEUE_COMMANDS
+do
+    if [ "$queue_type" == "RETURN" ]; then
+        return
+    elif [ "$queue_type" == "all" ]; then
+        postsuper -d ALL | less
+    elif [ "$queue_type" == "deffered" ]; then
+        postsuper -d deferred
+    elif [ "$queue_type" == "qID" ]; then
+        postsuper -d $(usr_input "queue ID")
+    elif [ "$queue_type" == "flush_queue" ]; then
+        postqueue -f
+    fi
+done
+
+}
+
+pf_maps() {
+map=$1
+
+postmap hash:$map
+}
+
+pf_logs() {
+less $POSTFIX_LOG
+}
+
+my_state() {
+time_stamp=$(mytime '-date time')
+cat << EOM
+
+$(make_line 30 -+)
+               time: $time_stamp
+  selected log file: $POSTFIX_LOG [$(ls -lh $POSTFIX_LOG | awk '{print $5 "  " $6 " " $7 " " $8}')]
+          last step: $last_step
+
+                press Enter for menu
+$(make_line 30 -+)
+
+EOM
+}
+
+main() {
+MAIN_MENU=" exit anti_spam postfix_maintenance postfix_logs statistics help"
+echo -e "\n$(make_line 20 =)  Postfix Administrator  $(make_line 20 =)\n"
+
+select menu_item in $MAIN_MENU
+do
+    if [ "$menu_item" == "exit" ]; then
+        exit
+    elif [ "$menu_item" == "anti_spam" ]; then
+        anti_spam
+    elif [ "$menu_item" == "postfix_maintenance" ]; then
+        pf_maintenance
+    elif [ "$menu_item" == "postfix_logs" ]; then
+        less $POSTFIX_LOG
+    elif [ "$menu_item" == "statistics" ]; then
+        pf_stats
+    elif [ "$menu_item" == "help" ]; then
+        my_help
+    fi
+    my_state
+done
+}
+
+main
