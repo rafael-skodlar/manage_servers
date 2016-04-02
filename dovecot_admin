@@ -12,7 +12,7 @@ FUNCTIONS="$FUNCTIONS1 $FUNCTIONS2"
 
 OPEN_SSL_CERT_DIR=/etc/ssl/certs
 OPEN_SSL_KEY_DIR=/etc/ssl/private
-OPEN_SSL_CONFIG=/root/etc/dovecot-openssl.conf
+OPEN_SSL_CONFIG=/etc/dovecot/dovecot-openssl.conf
 DOVECOT_CERTIFICATE=${OPEN_SSL_CERT_DIR}/dovecot.pem
 DOVECOT_KEY=${OPEN_SSL_KEY_DIR}/dovecot.pem
 DAYS=900
@@ -20,6 +20,8 @@ DOVECOT_CONFIG_DIR=/etc/dovecot
 DOVECOT_CONF_D=${DOVECOT_CONFIG_DIR}/conf.d
 DOVECOT_LOG_DIR=/var/log/dovecot
 EMAIL_ACCESS=${DOVECOT_CONFIG_DIR}/maps/access_client
+VIRT_AUTH_CONF=/var/mail/auth.d
+VIRT_DOMAIN_CONF=/var/mail/conf.d
 
 LOG_DIR=${HOME}/var/dovecot
 LAST_STATE=${UTIL_NAME}_last_state
@@ -78,11 +80,21 @@ mode=$1
 if [ "$mode" == "dovecot.conf" ]; then
     file2edit=${DOVECOT_CONFIG_DIR}/dovecot.conf
     vi $file2edit
+    last_step="edited $file2edit"
 elif [ "$mode" == "conf.d" ]; then
-    file2edit=$(select_file -all $DOVECOT_CONF_D)
-    vi ${DOVECOT_CONF_D}/$file2edit
+    edit_files=$(cd $DOVECOT_CONF_D; ls)
+    select f2edit in RETURN $edit_files
+    do
+        if [ "$f2edit" == "RETURN" ]; then
+            break
+        else
+            file2edit=$f2edit
+            vi ${DOVECOT_CONF_D}/$file2edit
+        fi
+        last_step="edited $file2edit"
+        echo -e "\n    ..... $last_step"
+   done
 fi
-last_step="edited $file2edit"
 }
 
 dovecot_logs() {
@@ -90,33 +102,36 @@ LOGS_MENU="RETURN dovecot_logs mail_log"
 dovecot_log_files="dovecot.log debug.log info.log"
 mode=$1
 
-pushd .
-cd $DOVECOT_LOG_DIR
-for dovecot_log in $dovecot_log_files
-do
-    if [ -e $dovecot_log ]; then
-        ls -lh $dovecot_log | awk '{print $9 "  " $5 "  " $6 " " $7 " " $8}'
-    fi
-done
-popd
-
-select logs in $LOGS_MENU
-do
-    if [ "$logs" == "RETURN" ]; then
-        break
-    elif [ "$logs" == "dovecot_logs" ]; then
-        echo -e "\nlog files under $DOVECOT_LOG_DIR\n"
-        log2view=$(select_file -all $DOVECOT_LOG_DIR)
-        less ${DOVECOT_LOG_DIR}/$log2view
-    elif [ "$logs" == "mail_log" ]; then
-        log2view=$(select_file -pre /var/log mail)
-        less /var/log/$log2view
-    fi
-    echo -e "\nreviewed: $log2view\n"
-# doveadm stats dump|top
-# search -u user
-done
-last_step="view $log2view"
+if  [ "$mode" == "stats" ]; then
+    pushd $PWD
+    cd $DOVECOT_LOG_DIR
+    for dovecot_log in $dovecot_log_files
+    do
+        if [ -e $dovecot_log ]; then
+            ls -lh $dovecot_log | awk '{print $9 "  " $5 "  " $6 " " $7 " " $8}'
+        fi
+    done
+    popd
+    last_step="stats $log2view"
+elif  [ "$mode" == "view" ]; then
+    select logs in $LOGS_MENU
+    do
+        if [ "$logs" == "RETURN" ]; then
+            break
+        elif [ "$logs" == "dovecot_logs" ]; then
+            echo -e "\nlog files under $DOVECOT_LOG_DIR\n"
+            log2view=$(select_file -all $DOVECOT_LOG_DIR)
+            less ${DOVECOT_LOG_DIR}/$log2view
+        elif [ "$logs" == "mail_log" ]; then
+            log2view=$(select_file -pre /var/log mail)
+            less /var/log/$log2view
+        fi
+        echo -e "\nreviewed: $log2view\n"
+        # doveadm stats dump|top
+        # search -u user
+        last_step="view $log2view"
+    done
+fi
 }
 
 account_test() {
@@ -131,7 +146,7 @@ do
         email_account=$(usr_input "email account" $email_account)
         remote_IP=$(usr_input "remote IP" $remote_IP)
         doveadm auth test -x service=$protocol -x rip=$remote_IP $email_account
-        last_step="tested protocol: $protocol account: $email_account"
+        last_step="test protocol: $protocol account: $email_account"
         doveadm user $email_account
     fi
 done
@@ -153,7 +168,7 @@ do
         state="configuration check -> grep $string"
     elif [ "$check_menu" == "grep_with_file_names" ]; then
         string=$(usr_input "grep string" $string)
-        grep -rH $string $DOVECOT_CONFIG_DIR
+        grep -rH $string ${DOVECOT_CONFIG_DIR}/*conf
         state="configuration check -> grep $string with file names"
     fi
 done
@@ -164,9 +179,11 @@ mk_ssl_key() {
 # make openssl keys for dovecot
 
 if [ -e $DOVECOT_CERTIFICATE ]; then
-    echo -e "Warning: won't overwrite $DOVECOT_CERTIFICATE\n"
+    echo -e "\n>>>>> Warning: won't overwrite $DOVECOT_CERTIFICATE\n"
+    echo "openssl req -new -x509 -nodes -config $OPEN_SSL_CONFIG -out $DOVECOT_CERTIFICATE -keyout $DOVECOT_KEY -days $DAYS"
 elif [ -e $DOVECOT_KEY ]; then
-    echo -e "Warning: won't overwrite $KEYFILE\n"
+    echo -e "\n>>>>> Warning: won't overwrite $KEYFILE\nYou may overwrite it with:\n"
+    echo "openssl req -new -x509 -nodes -config $OPEN_SSL_CONFIG -out $DOVECOT_CERTIFICATE -keyout $DOVECOT_KEY -days $DAYS"
 else
     echo -e "\n.... generating SSL key"
     openssl req -new -x509 -nodes -config $OPEN_SSL_CONFIG -out $DOVECOT_CERTIFICATE -keyout $DOVECOT_KEY -days $DAYS
@@ -192,7 +209,7 @@ do
         service dovecot start
     elif [ "$maintenance_menu" == "process_ID" ]; then
         echo -e "..... dovecot processes"
-        ps ax | grep dovecot | grep -v grep | grep -v $UTIL_NAME
+        ps aux | grep dovecot | grep -v grep | grep -v $UTIL_NAME
     elif [ "$maintenance_menu" == "make_ssl_key" ]; then
         mk_ssl_key
     fi
@@ -261,47 +278,59 @@ Main menu:
                  doveadm  commands (who, user, kick, pw)
           log_statistics  size of log files
 
-   directories:
-        config: $DOVECOT_CONFIG_DIR
-          logs: $DOVECOT_LOG_DIR
-    cert files: $CERTDIR
+    directories:
+         config: $DOVECOT_CONFIG_DIR
+           logs: $DOVECOT_LOG_DIR
+     cert files: $DOVECOT_CERTIFICATE
+virtual domains: $VIRT_DOMAIN_CONF
+       mail dir: /var/mail/<domain name>
 
 $(make_line 60 \|)
 
 EOM
 }
 
-manage_virtual_domains() {
-VD_MENU="RETURN domains users_files password_files"
-echo -e "\n$(make_line 60 +)\n\tunder construction\n"
+virtual_domains() {
+VD_MENU="RETURN domain_select users_files edit_password_file make_password"
+
+if [ "$domain" == "" ]; then
+    domain=$(select_file -all /var/mail/auth.d)
+fi
+
 select vd_item in $VD_MENU
 do
     if [ "$vd_item" == "RETURN" ]; then
         break
-    elif [ "$vd_item" == "domains" ]; then
-        ls -l /var/mail/
+    elif [ "$vd_item" == "domain_select" ]; then
+        domain=$(select_file -all /var/mail/auth.d)
     elif [ "$vd_item" == "users_files" ]; then
-        ls -l /var/mail/conf.d
-    elif [ "$vd_item" == "password_files" ]; then
-        ls -l /var/mail/auth.d
+        ls -l /var/mail/$domain
+    elif [ "$vd_item" == "edit_password_file" ]; then
+        vi ${VIRT_DOMAIN_CONF}/${domain}/passwd
+        echo -e "\n..... edited: ${VIRT_DOMAIN_CONF}/${domain}/passwd"
+    elif [ "$vd_item" == "make_password" ]; then
+        echo -e "\n password for user - under construction"
+        email_account=$(usr_input "email account" $email_account)
     fi
+    echo -e "\n..... domain: $domain"
 done
 last_step="manage virtual domains"
 }
 
-troubleshooting() {
+troubleshoot_connection() {
 cat << EOM
 
-test connection from your workstation:
-openssl s_client -connect $(echo $HOSTNAME:993)
+... test on the server side:
+openssl x509 -subject -fingerprint -noout -in $DOVECOT_CERTIFICATE
 
-openssl x509 -subject -fingerprint -noout -in ${CERTDIR}/dovecot.pem
+... test connection from your workstation:
+openssl s_client -connect $HOSTNAME:993
 
 EOM
 }
 
 main() {
-MAIN_MENU="EXIT edit_dovecot_conf edit_conf.d virtual_domains dovecot_config_check dovecot_logs dovecot_test maintenance doveadm dovecot_conf_backup log_statistics help"
+MAIN_MENU="EXIT edit_dovecot_conf edit_conf.d manage_virtual_domains dovecot_config_check dovecot_logs dovecot_test maintenance doveadm dovecot_conf_backup log_statistics troubleshooting help"
 
 last_state load
 echo -e "\tlast step: $last_step\n"
@@ -324,8 +353,8 @@ do
         edit_file dovecot.conf
     elif [ "$menu_item" == "edit_conf.d" ]; then
         edit_file conf.d
-    elif [ "$menu_item" == "virtual_domains" ]; then
-        manage_virtual_domains
+    elif [ "$menu_item" == "manage_virtual_domains" ]; then
+        virtual_domains
     elif [ "$menu_item" == "dovecot_config_check" ]; then
         check_config
      elif [ "$menu_item" == "dovecot_logs" ]; then
@@ -345,6 +374,8 @@ do
         echo -e "..... backup "
         tar -cf $backup_tar /etc/dovecot
         ls -lh $backup_tar
+    elif [ "$menu_item" == "troubleshooting" ]; then
+        troubleshoot_connection
     elif [ "$menu_item" == "help" ]; then
         my_help
     fi

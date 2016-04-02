@@ -85,14 +85,16 @@ do
     if [ "$anti_spam_item" == "RETURN" ]; then
         return
     fi
-    domain=$(usr_input "block domain or IP")
+    domain=$(usr_input "domain name or IP")
     grep $domain $EMAIL_HEADER_CHECKS
     if [ $? -eq 0 ]; then
         echo -e "$domain possibly blocked already"
+    elif  [ "$domain" == "" ]; then
+        echo -e "domain name or IP can't be empty"
+        continue
     fi
     if [ "$anti_spam_item" == "block_domain_or_IP" ]; then
             echo -e "/^Received: .*.${domain}.*/ REJECT" >> $EMAIL_HEADER_CHECKS
-        fi
     elif [ "$anti_spam_item" == "block_IP" ]; then
         IP=$(usr_input "block IP")
         echo "$IP REJECT" >> $EMAIL_ACCESS
@@ -113,7 +115,7 @@ do
     #postmap hash:$EMAIL_HEADER_CHECKS
     #postmap $EMAIL_HEADER_CHECKS
     echo "..... blocked $domain"
-    last_step="blocked $domain"
+    last_step="blocked [$domain]"
     break
 done
 }
@@ -129,9 +131,11 @@ do
     elif [ "$postfix_command" == "edit_config_files" ]; then
         file2edit=$(select_file -all $POSTFIX_CONFIG_DIR)
         vi $file2edit
+        last_step="edited $file2edit"
     elif [ "$postfix_command" == "edit_maps" ]; then
         file2edit=$(select_file -all ${POSTFIX_CONFIG_DIR}/maps)
         vi maps/$file2edit
+        last_step="edited maps/$file2edit"
     elif [ "$postfix_command" == "reload" ]; then
         service postfix reload
         last_step="reload"
@@ -159,6 +163,7 @@ do
         less $POSTFIX_LOG
         last_step="view file: $POSTFIX_LOG"
     fi
+    #last_step="edited $postfix_command"
     break
 done
 }
